@@ -1,0 +1,40 @@
+{
+  "project_info": {
+    "project_number": "566200168229",
+    "firebase_url": "https://fetchio.firebaseio.com",
+    "project_id": "fetchio",
+    "storage_bucket": "fetchio.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:566200168229:android:cfd85689909d791641b4cc",
+        "android_client_info": {
+          "package_name": "de.hsbo.fetch"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "566200168229-9ds1ia83n5nnej6dup9qvus3rottga9v.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAzW_jzYj88D-lWKv96vqlppiDGjzgp6fc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "566200168229-9ds1ia83n5nnej6dup9qvus3rottga9v.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

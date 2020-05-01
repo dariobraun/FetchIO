@@ -1,0 +1,21 @@
+<resources>
+    <string name="app_name">Fetch</string>
+    <string name="item_name">Item</string>
+    <string name="last_used_items">Last Used Items</string>
+    <string name="item_info">Additional info...</string>
+    <string name="add_btn">Add</string>
+    <string name="new_item_hint">New Item...</string>
+    <string name="new_item_info_btn">...</string>
+    <string name="item_info_dialog_heading">Additional Info</string>
+    <string name="cancel_btn">Cancel</string>
+    <string name="additional_info_dialog_input">Additional Item Info...</string>
+    <string name="title_activity_login">Sign in</string>
+    <string name="prompt_email">Email</string>
+    <string name="prompt_password">Password</string>
+    <string name="action_sign_in">Sign in or register</string>
+    <string name="action_sign_in_short">Sign in</string>
+    <string name="welcome">"Welcome !"</string>
+    <string name="invalid_username">Not a valid username</string>
+    <string name="invalid_password">Password must be >5 characters</string>
+    <string name="login_failed">"Login failed"</string>
+</resources>
