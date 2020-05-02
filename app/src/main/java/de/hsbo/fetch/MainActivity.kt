@@ -18,7 +18,6 @@ import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.ValueEventListener
 import com.google.firebase.database.ktx.database
-import com.google.firebase.database.ktx.getValue
 import com.google.firebase.ktx.Firebase
 import kotlinx.android.synthetic.main.activity_main.*
 
@@ -28,11 +27,8 @@ class MainActivity : AppCompatActivity(), OnAddInfoButtonClick {
     private val RC_SIGN_IN = 1
 
     /** Database setup*/
-    val database = Firebase.database.reference
-    val usersRef = database.child("users")
-    private lateinit  var user: FirebaseUser
-    // Listener for database data
-    private lateinit var dbItemListener: ValueEventListener
+    private val database = Firebase.database.reference
+    private val usersRef = database.child("users")
 
     // properties for shopping list recyclerview
     private lateinit var listRecyclerView: RecyclerView
@@ -46,10 +42,10 @@ class MainActivity : AppCompatActivity(), OnAddInfoButtonClick {
 
 
     // Initializing an empty ArrayList to be filled with items
-    private val items: ArrayList<Item> = ArrayList()
+    private var items: MutableList<Item> = mutableListOf()
 
     // Initializing an empty ArrayList to be filled with last used items
-    private val lastUsedItems: ArrayList<Item> = ArrayList()
+    private val lastUsedItems: MutableList<Item> = mutableListOf()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         /** Authentication*/
@@ -73,25 +69,17 @@ class MainActivity : AppCompatActivity(), OnAddInfoButtonClick {
         listViewManager = GridLayoutManager(this, 3)
         listViewAdapter = ItemAdapter(items, this, object : OnItemRemovedListener {
             override fun onItemRemovedFromList(item: Item) {
-                val user = Firebase
-                items.remove(item)
-                listViewAdapter.notifyDataSetChanged()
-                lastUsedItems.add(item);
-                lastUsedViewAdapter.notifyDataSetChanged()
+                removeItemFromList(item, "items")
+                addItemToList(item, "lastUsedItems")
             }
         })
         lastUsedViewManager = GridLayoutManager(this, 3)
         lastUsedViewAdapter = ItemAdapter(lastUsedItems, this, object : OnItemRemovedListener {
             override fun onItemRemovedFromList(item: Item) {
-                items.add(item)
-                listViewAdapter.notifyDataSetChanged()
-                lastUsedItems.remove(item);
-                lastUsedViewAdapter.notifyDataSetChanged()
+                removeItemFromList(item, "lastUsedItems")
+                addItemToList(item, "items")
             }
         })
-
-        // Load initial items into ArrayList
-//        addItems()
 
         listRecyclerView = rv_shopping_list.apply {
             // Changes in context don't change layout size so set fixed size
@@ -129,11 +117,9 @@ class MainActivity : AppCompatActivity(), OnAddInfoButtonClick {
         // Handle clicks on "ADD" button
         btn_add.setOnClickListener {
             if (pt_new_item.text.isNotEmpty()) {
-                val newItemName = pt_new_item.text.toString()
-                items.add(Item(newItemName, "", ""))
-                listViewAdapter.notifyItemInserted(items.size)
+                val newItem = Item(pt_new_item.text.toString(), "", "")
+                addItemToList(newItem, "items")
                 resetAddItemInput()
-                saveItemsToDB(user.uid, items)
             }
         }
 
@@ -144,18 +130,11 @@ class MainActivity : AppCompatActivity(), OnAddInfoButtonClick {
         }
     }
 
-//    // Adds items to the empty items ArrayList
-//    private fun addItems() {
-//        items.add(Item("Carrots", "Juicy Carrots", ""))
-//        items.add(Item("Beef", "Ground Beef", ""))
-//    }
-
     // Handle click on "ADD" button in additional info dialog
     override fun onAddItemInfoClicked(input: String) {
         if (pt_new_item.text.isNotEmpty()) {
-            val newItemName = pt_new_item.text.toString()
-            items.add(Item(newItemName, input, ""))
-            listViewAdapter.notifyDataSetChanged()
+            val newItem = Item(pt_new_item.text.toString(), input, "")
+            addItemToList(newItem, "items")
             resetAddItemInput()
         }
 
@@ -167,6 +146,9 @@ class MainActivity : AppCompatActivity(), OnAddInfoButtonClick {
         pt_new_item.setText("")
     }
 
+    /**
+     * Callback for user login - After successful login, save email in db and get item data from db
+     */
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
 
@@ -174,33 +156,113 @@ class MainActivity : AppCompatActivity(), OnAddInfoButtonClick {
             val response = IdpResponse.fromResultIntent(data)
             if (resultCode == Activity.RESULT_OK) {
                 // Successfully signed in
-                user = FirebaseAuth.getInstance().currentUser!!
-                val dbItemListener = object : ValueEventListener {
-                    override fun onDataChange(dataSnapshot: DataSnapshot) {
-                        // Get Post object and use the values to update the UI
-                        println("DATABASE DATA: ${dataSnapshot.getValue<ArrayList<Item>>()}")
-                        // ...
-                    }
-
-                    override fun onCancelled(databaseError: DatabaseError) {
-                        // Getting Post failed, log a message
-                        Log.w("ERROR", "loadPost:onCancelled", databaseError.toException())
-                        // ...
-                    }
-                }
-                usersRef.child(user.uid).child("items").addValueEventListener(dbItemListener)
-
+                val user = FirebaseAuth.getInstance().currentUser!!
+                saveUserEmailInDB(user)
+                setDBListenerForUserItems()
+                setDBListenerForLastUsedUserItems()
             } else {
                 println("LOGIN FAILED")
                 // Sign in failed. If response is null the user canceled the
                 // sign-in flow using the back button. Otherwise check
                 // response.getError().getErrorCode() and handle the error.
-                // ...
             }
         }
     }
 
-    private fun saveItemsToDB(userId: String, items: ArrayList<Item>) {
-        database.child("users").child(userId).child("items").setValue(items)
+    /**
+     * Add a listener the db's user node and save the email address if not already there
+     */
+    private fun saveUserEmailInDB(user: FirebaseUser) {
+        val userEmailListener = object : ValueEventListener {
+            override fun onDataChange(dataSnapshot: DataSnapshot) {
+                if (!dataSnapshot.hasChild("email")) {
+                    database.child("users").child(user.uid).child("email").setValue(user.email)
+                }
+            }
+
+            override fun onCancelled(databaseError: DatabaseError) {
+                // Getting Post failed, log a message
+                Log.w("ERROR", "loadPost:onCancelled", databaseError.toException())
+                // ...
+            }
+        }
+        usersRef.child(user.uid).addListenerForSingleValueEvent(userEmailListener)
+    }
+
+    private fun removeItemFromList(item: Item, childNode: String) {
+        val user = FirebaseAuth.getInstance().currentUser!!
+        removeItemFromDB(user.uid, item, childNode)
+    }
+
+    private fun removeItemFromDB(userId: String, item: Item, childNode: String) {
+        usersRef.child(userId).child(childNode).child(item.key).removeValue()
+    }
+
+    private fun addItemToList(item: Item, childNode: String) {
+        val user = FirebaseAuth.getInstance().currentUser!!
+        saveItemInDB(user.uid, item, childNode)
+    }
+
+    private fun saveItemInDB(userId: String, item: Item, childNode: String) {
+        val newItemKey = database.child("users").child(userId).child(childNode).push().key
+        item.key = newItemKey!!
+        val itemValues = item.toMap()
+        val childUpdates = HashMap<String, Any>()
+        childUpdates["users/$userId/$childNode/$newItemKey"] = itemValues
+        database.updateChildren(childUpdates)
+    }
+
+    /**
+     * Listen for changes in database's "users/userId/items" node
+     */
+    private fun setDBListenerForUserItems() {
+        val user = FirebaseAuth.getInstance().currentUser!!
+        val userItemsListener = object : ValueEventListener {
+            override fun onDataChange(dataSnapshot: DataSnapshot) {
+                // Empty items list and repopulate with database data
+                items.clear()
+                dataSnapshot.children.forEach {
+                    val item: Item = it.getValue(Item::class.java)!!
+                    items.add(item)
+                }
+                listViewAdapter.notifyDataSetChanged()
+                // ...
+            }
+
+            override fun onCancelled(databaseError: DatabaseError) {
+                // Getting Post failed, log a message
+                Log.w("ERROR", "loadPost:onCancelled", databaseError.toException())
+                // ...
+            }
+        }
+        usersRef.child(user.uid).child("items")
+            .addValueEventListener(userItemsListener)
+    }
+
+    /**
+     * Listen for changes in database's "users/userId/lastUsedItems" node
+     */
+    private fun setDBListenerForLastUsedUserItems() {
+        val user = FirebaseAuth.getInstance().currentUser!!
+        val userLastUsedItemsListener = object : ValueEventListener {
+            override fun onDataChange(dataSnapshot: DataSnapshot) {
+                // Empty items list and repopulate with database data
+                lastUsedItems.clear()
+                dataSnapshot.children.forEach {
+                    val item: Item = it.getValue(Item::class.java)!!
+                    lastUsedItems.add(item)
+                }
+                lastUsedViewAdapter.notifyDataSetChanged()
+                // ...
+            }
+
+            override fun onCancelled(databaseError: DatabaseError) {
+                // Getting Post failed, log a message
+                Log.w("ERROR", "loadPost:onCancelled", databaseError.toException())
+                // ...
+            }
+        }
+        usersRef.child(user.uid).child("lastUsedItems")
+            .addValueEventListener(userLastUsedItemsListener)
     }
 }

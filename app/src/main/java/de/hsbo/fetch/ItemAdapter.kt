@@ -18,7 +18,7 @@ import org.json.JSONObject
 
 
 class ItemAdapter(
-    val items: ArrayList<Item>,
+    val items: MutableList<Item>,
     private val context: Context,
     private val removeListener: OnItemRemovedListener
 ) :
@@ -49,8 +49,7 @@ class ItemAdapter(
     }
 
     override fun onAPIImageReturned(response: JSONObject, item: Item, imageView: ImageView) {
-        item.image = "https://spoonacular.com/cdn/ingredients_100x100/${response["image"]}"
-        Picasso.get().load(item.image).into(imageView);
+        Picasso.get().load("https://spoonacular.com/cdn/ingredients_100x100/${response["image"]}").into(imageView);
     }
 
     private fun getImage(item: Item, imageView: ImageView) {
@@ -67,7 +66,6 @@ class ItemAdapter(
                 if (response.length() > 0) {
                     onAPIImageReturned(response.getJSONObject(0), item, imageView)
                 } else {
-                    item.image = ""
                     imageView.setImageResource(R.drawable.ic_supermarkt)
                 }
             },
