@@ -69,15 +69,29 @@ class MainActivity : AppCompatActivity(), OnAddInfoButtonClick {
         listViewManager = GridLayoutManager(this, 3)
         listViewAdapter = ItemAdapter(items, this, object : OnItemRemovedListener {
             override fun onItemRemovedFromList(item: Item) {
-                removeItemFromList(item, "items")
-                addItemToList(item, "lastUsedItems")
+                val user = FirebaseAuth.getInstance().currentUser!!
+                items.remove(item)
+                listViewAdapter.notifyDataSetChanged()
+                if (!lastUsedItems.contains(item)) {
+                    lastUsedItems.add(item)
+                    lastUsedViewAdapter.notifyDataSetChanged()
+                    saveItemInDB(user.uid, item, "lastUsedItems")
+                }
+                removeItemFromDB(user.uid, item, "items")
             }
         })
         lastUsedViewManager = GridLayoutManager(this, 3)
         lastUsedViewAdapter = ItemAdapter(lastUsedItems, this, object : OnItemRemovedListener {
             override fun onItemRemovedFromList(item: Item) {
-                removeItemFromList(item, "lastUsedItems")
-                addItemToList(item, "items")
+                val user = FirebaseAuth.getInstance().currentUser!!
+                lastUsedItems.remove(item)
+                lastUsedViewAdapter.notifyDataSetChanged()
+                if (!items.contains(item)) {
+                    items.add(item)
+                    listViewAdapter.notifyDataSetChanged()
+                    saveItemInDB(user.uid, item, "items")
+                }
+                removeItemFromDB(user.uid, item, "lastUsedItems")
             }
         })
 
@@ -118,7 +132,9 @@ class MainActivity : AppCompatActivity(), OnAddInfoButtonClick {
         btn_add.setOnClickListener {
             if (pt_new_item.text.isNotEmpty()) {
                 val newItem = Item(pt_new_item.text.toString(), "", "")
-                addItemToList(newItem, "items")
+                items.add(newItem)
+                val user = FirebaseAuth.getInstance().currentUser!!
+                saveItemInDB(user.uid, newItem, "items")
                 resetAddItemInput()
             }
         }
@@ -134,7 +150,9 @@ class MainActivity : AppCompatActivity(), OnAddInfoButtonClick {
     override fun onAddItemInfoClicked(input: String) {
         if (pt_new_item.text.isNotEmpty()) {
             val newItem = Item(pt_new_item.text.toString(), input, "")
-            addItemToList(newItem, "items")
+            items.add(newItem)
+            val user = FirebaseAuth.getInstance().currentUser!!
+            saveItemInDB(user.uid, newItem, "items")
             resetAddItemInput()
         }
 
@@ -189,18 +207,8 @@ class MainActivity : AppCompatActivity(), OnAddInfoButtonClick {
         usersRef.child(user.uid).addListenerForSingleValueEvent(userEmailListener)
     }
 
-    private fun removeItemFromList(item: Item, childNode: String) {
-        val user = FirebaseAuth.getInstance().currentUser!!
-        removeItemFromDB(user.uid, item, childNode)
-    }
-
     private fun removeItemFromDB(userId: String, item: Item, childNode: String) {
         usersRef.child(userId).child(childNode).child(item.key).removeValue()
-    }
-
-    private fun addItemToList(item: Item, childNode: String) {
-        val user = FirebaseAuth.getInstance().currentUser!!
-        saveItemInDB(user.uid, item, childNode)
     }
 
     private fun saveItemInDB(userId: String, item: Item, childNode: String) {
