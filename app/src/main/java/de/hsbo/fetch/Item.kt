@@ -1,8 +1,9 @@
 package de.hsbo.fetch
 
 import com.google.firebase.database.Exclude
+import java.io.Serializable
 
-data class Item(val name: String, val info: String, var key: String) {
+data class Item(val name: String, val info: String, var key: String): Serializable {
 
     constructor() : this(
         "", "", ""

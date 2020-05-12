@@ -49,7 +49,8 @@ class ItemAdapter(
     }
 
     override fun onAPIImageReturned(response: JSONObject, item: Item, imageView: ImageView) {
-        Picasso.get().load("https://spoonacular.com/cdn/ingredients_100x100/${response["image"]}").into(imageView);
+        Picasso.get().load("https://spoonacular.com/cdn/ingredients_100x100/${response["image"]}")
+            .into(imageView);
     }
 
     private fun getImage(item: Item, imageView: ImageView) {
@@ -69,7 +70,12 @@ class ItemAdapter(
                     imageView.setImageResource(R.drawable.ic_supermarkt)
                 }
             },
-            Response.ErrorListener { error -> println(error) })
+            Response.ErrorListener { error ->
+                run {
+                    imageView.setImageResource(R.drawable.ic_supermarkt)
+                    println(error)
+                }
+            })
 
         // Add the request to the RequestQueue.
         queue.add(jsonReq)

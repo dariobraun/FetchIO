@@ -2,6 +2,7 @@ package de.hsbo.fetch
 
 import android.app.Activity
 import android.content.Intent
+import android.content.SharedPreferences
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
@@ -16,19 +17,26 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
+import com.google.firebase.database.DatabaseReference
 import com.google.firebase.database.ValueEventListener
 import com.google.firebase.database.ktx.database
 import com.google.firebase.ktx.Firebase
+import de.hsbo.fetch.storage.InternalStorage.readObject
+import de.hsbo.fetch.storage.InternalStorage.writeObject
 import kotlinx.android.synthetic.main.activity_main.*
+import java.io.IOException
 
 
 class MainActivity : AppCompatActivity(), OnAddInfoButtonClick {
 
+    private var sharedPref: SharedPreferences? = null
+    private var user: FirebaseUser? = null
+    private val TAG: String = "MainActivity"
     private val RC_SIGN_IN = 1
 
-    /** Database setup*/
-    private val database = Firebase.database.reference
-    private val usersRef = database.child("users")
+    // Database setup
+    private lateinit var database: DatabaseReference
+    private lateinit var usersRef: DatabaseReference
 
     // properties for shopping list recyclerview
     private lateinit var listRecyclerView: RecyclerView
@@ -48,71 +56,39 @@ class MainActivity : AppCompatActivity(), OnAddInfoButtonClick {
     private val lastUsedItems: MutableList<Item> = mutableListOf()
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        /** Authentication*/
-        // Choose authentication providers
-        val providers = arrayListOf(
-            AuthUI.IdpConfig.EmailBuilder().build()
-        )
-        // Create and launch sign-in intent
-        startActivityForResult(
-            AuthUI.getInstance()
-                .createSignInIntentBuilder()
-                .setAvailableProviders(providers)
-                .build(),
-            RC_SIGN_IN
-        )
+        /** Enable Firebase disk persistence - writes data locally to device */
+        Firebase.database.setPersistenceEnabled(true)
+        database = Firebase.database.reference
+        usersRef = database.child("users")
+
+        user = FirebaseAuth.getInstance().currentUser
+        if (user == null) {
+            this.startLoginActivity()
+        } else {
+            this.setDBListeners()
+        }
 
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        // Initialise both RecyclerView Managers and Adapters using the same custom Adapter - ItemAdapter
-        listViewManager = GridLayoutManager(this, 3)
-        listViewAdapter = ItemAdapter(items, this, object : OnItemRemovedListener {
-            override fun onItemRemovedFromList(item: Item) {
-                val user = FirebaseAuth.getInstance().currentUser!!
-                items.remove(item)
-                listViewAdapter.notifyDataSetChanged()
-                if (!lastUsedItems.contains(item)) {
-                    lastUsedItems.add(item)
-                    lastUsedViewAdapter.notifyDataSetChanged()
-                    saveItemInDB(user.uid, item, "lastUsedItems")
-                }
-                removeItemFromDB(user.uid, item, "items")
-            }
-        })
-        lastUsedViewManager = GridLayoutManager(this, 3)
-        lastUsedViewAdapter = ItemAdapter(lastUsedItems, this, object : OnItemRemovedListener {
-            override fun onItemRemovedFromList(item: Item) {
-                val user = FirebaseAuth.getInstance().currentUser!!
-                lastUsedItems.remove(item)
-                lastUsedViewAdapter.notifyDataSetChanged()
-                if (!items.contains(item)) {
-                    items.add(item)
-                    listViewAdapter.notifyDataSetChanged()
-                    saveItemInDB(user.uid, item, "items")
-                }
-                removeItemFromDB(user.uid, item, "lastUsedItems")
-            }
-        })
+        this.setupRecyclerViews()
 
-        listRecyclerView = rv_shopping_list.apply {
-            // Changes in context don't change layout size so set fixed size
-            setHasFixedSize(true)
-            // Connect LayoutManager (GridLayoutManager)
-            layoutManager = listViewManager
-            // Connect ItemAdapter
-            adapter = listViewAdapter
+        this.setupUIClickListeners()
+    }
+
+    // Handle click on "ADD" button in additional info dialog
+    override fun onAddItemInfoClicked(input: String) {
+        if (pt_new_item.text.isNotEmpty()) {
+            val newItem = Item(pt_new_item.text.toString(), input, "")
+            items.add(newItem)
+
+            saveItemInDB(user?.uid, newItem, "items")
+            resetAddItemInput()
         }
 
-        lastUsedRecyclerView = rv_last_used.apply {
-            // Changes in context don't change layout size so set fixed size
-            setHasFixedSize(true)
-            // Connect LayoutManager (GridLayoutManager)
-            layoutManager = lastUsedViewManager
-            // Connect ItemAdapter
-            adapter = lastUsedViewAdapter
-        }
+    }
 
+    private fun setupUIClickListeners() {
         // Disable button for adding item info on startup
         btn_add_info.isEnabled = false
         pt_new_item.addTextChangedListener(object : TextWatcher {
@@ -133,9 +109,9 @@ class MainActivity : AppCompatActivity(), OnAddInfoButtonClick {
             if (pt_new_item.text.isNotEmpty()) {
                 val newItem = Item(pt_new_item.text.toString(), "", "")
                 items.add(newItem)
-                val user = FirebaseAuth.getInstance().currentUser!!
-                saveItemInDB(user.uid, newItem, "items")
+                saveItemInDB(user?.uid, newItem, "items")
                 resetAddItemInput()
+
             }
         }
 
@@ -144,18 +120,6 @@ class MainActivity : AppCompatActivity(), OnAddInfoButtonClick {
             val itemInfoFragment = ItemInfoDialogFragment()
             itemInfoFragment.show(supportFragmentManager, "additionalInfo")
         }
-    }
-
-    // Handle click on "ADD" button in additional info dialog
-    override fun onAddItemInfoClicked(input: String) {
-        if (pt_new_item.text.isNotEmpty()) {
-            val newItem = Item(pt_new_item.text.toString(), input, "")
-            items.add(newItem)
-            val user = FirebaseAuth.getInstance().currentUser!!
-            saveItemInDB(user.uid, newItem, "items")
-            resetAddItemInput()
-        }
-
     }
 
     // Hide Keyboard, empty item input field
@@ -174,16 +138,63 @@ class MainActivity : AppCompatActivity(), OnAddInfoButtonClick {
             val response = IdpResponse.fromResultIntent(data)
             if (resultCode == Activity.RESULT_OK) {
                 // Successfully signed in
-                val user = FirebaseAuth.getInstance().currentUser!!
-                saveUserEmailInDB(user)
-                setDBListenerForUserItems()
-                setDBListenerForLastUsedUserItems()
+                user = FirebaseAuth.getInstance().currentUser!!
+                setDBListeners()
             } else {
                 println("LOGIN FAILED")
                 // Sign in failed. If response is null the user canceled the
                 // sign-in flow using the back button. Otherwise check
                 // response.getError().getErrorCode() and handle the error.
             }
+        }
+    }
+
+    private fun setupRecyclerViews() {
+
+        // Initialise both RecyclerView Managers and Adapters using the same custom Adapter - ItemAdapter
+        listViewManager = GridLayoutManager(this, 3)
+        listViewAdapter = ItemAdapter(items, this, object : OnItemRemovedListener {
+            override fun onItemRemovedFromList(item: Item) {
+                items.remove(item)
+                listViewAdapter.notifyDataSetChanged()
+                removeItemFromDB(user?.uid, item, "items")
+                if (!lastUsedItems.contains(item)) {
+                    lastUsedItems.add(item)
+                    lastUsedViewAdapter.notifyDataSetChanged()
+                    saveItemInDB(user?.uid, item, "lastUsedItems")
+                }
+            }
+        })
+        lastUsedViewManager = GridLayoutManager(this, 3)
+        lastUsedViewAdapter = ItemAdapter(lastUsedItems, this, object : OnItemRemovedListener {
+            override fun onItemRemovedFromList(item: Item) {
+                lastUsedItems.remove(item)
+                lastUsedViewAdapter.notifyDataSetChanged()
+                removeItemFromDB(user?.uid, item, "lastUsedItems")
+                if (!items.contains(item)) {
+                    items.add(item)
+                    listViewAdapter.notifyDataSetChanged()
+                    saveItemInDB(user?.uid, item, "items")
+                }
+            }
+        })
+
+        listRecyclerView = rv_shopping_list.apply {
+            // Changes in context don't change layout size so set fixed size
+            setHasFixedSize(true)
+            // Connect LayoutManager (GridLayoutManager)
+            layoutManager = listViewManager
+            // Connect ItemAdapter
+            adapter = listViewAdapter
+        }
+
+        lastUsedRecyclerView = rv_last_used.apply {
+            // Changes in context don't change layout size so set fixed size
+            setHasFixedSize(true)
+            // Connect LayoutManager (GridLayoutManager)
+            layoutManager = lastUsedViewManager
+            // Connect ItemAdapter
+            adapter = lastUsedViewAdapter
         }
     }
 
@@ -207,12 +218,12 @@ class MainActivity : AppCompatActivity(), OnAddInfoButtonClick {
         usersRef.child(user.uid).addListenerForSingleValueEvent(userEmailListener)
     }
 
-    private fun removeItemFromDB(userId: String, item: Item, childNode: String) {
-        usersRef.child(userId).child(childNode).child(item.key).removeValue()
+    private fun removeItemFromDB(userId: String?, item: Item, childNode: String) {
+        usersRef.child(userId!!).child(childNode).child(item.key).removeValue()
     }
 
-    private fun saveItemInDB(userId: String, item: Item, childNode: String) {
-        val newItemKey = database.child("users").child(userId).child(childNode).push().key
+    private fun saveItemInDB(userId: String?, item: Item, childNode: String) {
+        val newItemKey = database.child("users").child(userId!!).child(childNode).push().key
         item.key = newItemKey!!
         val itemValues = item.toMap()
         val childUpdates = HashMap<String, Any>()
@@ -220,11 +231,21 @@ class MainActivity : AppCompatActivity(), OnAddInfoButtonClick {
         database.updateChildren(childUpdates)
     }
 
+    private fun updateItemsInInternalStorage(userId: String) {
+        // Save the list of items to internal storage
+        try {
+            writeObject(this, userId, items)
+        } catch (e: IOException) {
+            Log.e(TAG, e.message)
+        } catch (e: ClassNotFoundException) {
+            Log.e(TAG, e.message)
+        }
+    }
+
     /**
      * Listen for changes in database's "users/userId/items" node
      */
     private fun setDBListenerForUserItems() {
-        val user = FirebaseAuth.getInstance().currentUser!!
         val userItemsListener = object : ValueEventListener {
             override fun onDataChange(dataSnapshot: DataSnapshot) {
                 // Empty items list and repopulate with database data
@@ -243,7 +264,7 @@ class MainActivity : AppCompatActivity(), OnAddInfoButtonClick {
                 // ...
             }
         }
-        usersRef.child(user.uid).child("items")
+        usersRef.child(user!!.uid).child("items")
             .addValueEventListener(userItemsListener)
     }
 
@@ -251,7 +272,6 @@ class MainActivity : AppCompatActivity(), OnAddInfoButtonClick {
      * Listen for changes in database's "users/userId/lastUsedItems" node
      */
     private fun setDBListenerForLastUsedUserItems() {
-        val user = FirebaseAuth.getInstance().currentUser!!
         val userLastUsedItemsListener = object : ValueEventListener {
             override fun onDataChange(dataSnapshot: DataSnapshot) {
                 // Empty items list and repopulate with database data
@@ -270,7 +290,38 @@ class MainActivity : AppCompatActivity(), OnAddInfoButtonClick {
                 // ...
             }
         }
-        usersRef.child(user.uid).child("lastUsedItems")
+        usersRef.child(user!!.uid).child("lastUsedItems")
             .addValueEventListener(userLastUsedItemsListener)
+    }
+
+    private fun setDBListeners() {
+        // Database connections
+        saveUserEmailInDB(user!!)
+        setDBListenerForUserItems()
+        setDBListenerForLastUsedUserItems()
+    }
+
+    private fun startLoginActivity() {
+        /** Authentication*/
+        // Choose authentication providers
+        val providers = arrayListOf(
+            AuthUI.IdpConfig.EmailBuilder().build()
+        )
+        // Create and launch sign-in intent
+        startActivityForResult(
+            AuthUI.getInstance()
+                .createSignInIntentBuilder()
+                .setAvailableProviders(providers)
+                .build(),
+            RC_SIGN_IN
+        )
+    }
+
+    private fun logoutUser() {
+        AuthUI.getInstance()
+            .signOut(this)
+            .addOnCompleteListener {
+                startLoginActivity()
+            }
     }
 }
